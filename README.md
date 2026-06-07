@@ -1,3 +1,12 @@
+---
+title: Smart Downloader
+emoji: 🎬
+colorFrom: teal
+colorTo: green
+sdk: docker
+app_port: 5177
+---
+
 # Smart Downloader
 
 A Docker-ready media download helper with a Chrome extension companion.
