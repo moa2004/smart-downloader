@@ -1,0 +1,14 @@
+node_modules/
+downloads/
+tools/cache/
+tools/bin/
+tools/browser-profile/
+tools/gh/
+tools/gh-windows-amd64.zip
+tools/*.log
+tools/*-check.png
+tools/logo-fixed-check.png
+dist/
+.env
+.DS_Store
+npm-debug.log*

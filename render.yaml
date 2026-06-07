@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: smart-downloader
+    env: docker
+    plan: free
+    autoDeploy: false
+    healthCheckPath: /api/tools

@@ -1,0 +1,29 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <div class="popup-brand">
+        <img src="icons/icon32.png" alt="" />
+        <h1>Smart Downloader</h1>
+      </div>
+      <button id="refresh" type="button">Refresh</button>
+    </header>
+    <label class="field-label" for="appUrl">App address</label>
+    <input id="appUrl" class="filename" type="url" />
+    <p class="hint">Play the video here, then send the captured links to the app.</p>
+    <input id="fileName" class="filename" type="text" placeholder="Save as: my-video" />
+    <div id="status" class="status"></div>
+    <div id="items" class="items"></div>
+    <footer>
+      <button id="openApp" type="button">Open app</button>
+      <button id="sendAll" type="button">Send all</button>
+      <button id="copyDebug" type="button">Copy debug</button>
+      <button id="clear" type="button">Clear</button>
+    </footer>
+    <script src="popup.js"></script>
+  </body>
+</html>

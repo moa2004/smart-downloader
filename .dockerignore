@@ -1,0 +1,8 @@
+node_modules
+downloads
+tools/cache
+tools/browser-profile
+tools/bin
+.git
+.env
+npm-debug.log

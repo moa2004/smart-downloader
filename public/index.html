@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Smart Downloader</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div class="hero-copy">
+          <div class="brand-row">
+            <img class="brand-mark" src="/logo.svg" width="44" height="44" alt="" />
+            <p class="eyebrow">Video and audio downloader</p>
+          </div>
+          <h1>Smart Downloader</h1>
+          <p class="lede">Paste the video link, choose the file name, and the app will prepare the best downloadable file it can find.</p>
+        </div>
+        <div class="hero-actions">
+          <button id="themeToggle" class="icon-button" type="button">Dark</button>
+          <div class="status-panel">
+            <span class="dot"></span>
+            <span>Ready</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="tool-grid">
+        <form id="auditForm" class="panel input-panel">
+          <label for="url">Video link</label>
+          <div class="url-row">
+            <input id="url" name="url" type="url" placeholder="https://example.com/video" required />
+            <button type="submit">Start download</button>
+          </div>
+          <label class="small-label" for="fileName">File name</label>
+          <input id="fileName" name="fileName" type="text" placeholder="my-video" />
+          <div class="actions compact-actions">
+            <button id="openSession" type="button" class="secondary-button">Open logged-in browser</button>
+          </div>
+          <details class="access-box">
+            <summary>Advanced access data</summary>
+            <textarea id="headers" spellcheck="false" placeholder='{"Cookie":"session=...","Referer":"https://example.com/watch","Authorization":"Bearer ..."}'></textarea>
+          </details>
+          <p class="note">For private videos, open the extension on the video page, play the video, then send the captured links here.</p>
+        </form>
+
+        <aside class="panel quick-checks">
+          <h2>Download engines</h2>
+          <div id="toolStack" class="tool-stack">
+            <span class="tool-chip">Loading tools...</span>
+          </div>
+        </aside>
+      </section>
+
+      <section id="loading" class="loading hidden">
+        <div class="spinner"></div>
+        <span>Preparing the download...</span>
+      </section>
+
+      <section id="results" class="results hidden"></section>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>
