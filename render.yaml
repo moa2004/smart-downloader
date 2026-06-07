@@ -1,7 +1,11 @@
 services:
   - type: web
     name: smart-downloader
-    env: docker
+    runtime: docker
+    repo: https://github.com/moa2004/smart-downloader
+    branch: main
     plan: free
-    autoDeploy: false
+    region: frankfurt
+    dockerfilePath: ./Dockerfile
+    autoDeployTrigger: "off"
     healthCheckPath: /api/tools
