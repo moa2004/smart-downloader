@@ -9,7 +9,7 @@
 5. Keep the exposed port as `5177`; the app also reads Render's `PORT` automatically.
 6. After deploy, open the Chrome extension and change `App address` to your live URL.
 
-This is the permanent deploy path. A `trycloudflare.com` link is only a temporary tunnel and stops when the local machine stops.
+This is the permanent deploy path. Temporary local tunnel links stop when the local machine stops.
 
 ## Local
 
