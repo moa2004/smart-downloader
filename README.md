@@ -13,10 +13,10 @@ A media download helper with a Chrome extension companion.
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/moa2004/smart-downloader)
 
-Default Vercel URL if you use the project name `smart-downloader`:
+Current Vercel URL:
 
 ```text
-https://smart-downloader.vercel.app
+https://smart-downloader-eight.vercel.app
 ```
 
 ## Local
