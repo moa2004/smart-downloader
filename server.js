@@ -31,9 +31,10 @@ const MANIFEST_TYPES = /(mpegurl|x-mpegurl|dash\+xml|mpd|vnd\.apple\.mpegurl)/i;
 const MEDIA_EXT = /\.(mp4|m4v|webm|mov|mkv|mp3|m4a|aac|wav|ogg|flac)(\?|#|$)/i;
 const MANIFEST_EXT = /\.(m3u8|mpd)(\?|#|$)/i;
 const BROWSER_CANDIDATE_TYPES = /(video|audio|mpegurl|dash\+xml|mpd|octet-stream)/i;
+const FACEBOOK_MEDIA_URL = /(?:^|\/\/)(?:[^/]+\.)?(?:fbcdn|facebook|fbsbx)\.(?:net|com)\/|(?:^|\/\/)video-[^/]+\.xx\.fbcdn\.net\//i;
 const STREAM_MEDIA_URL = /(googlevideo\.com|\/videoplayback\b|[?&]mime=(?:video|audio)%2F|[?&]mime=(?:video|audio)\/|[?&]itag=)/i;
-const RANGED_MEDIA_URL = /(googlevideo\.com|workspacevideo|\/drive\/media\/|\/videoplayback\b|\/playback\b)/i;
-const EMBEDDED_MEDIA_URLS = /https?:\/\/[^\s"'<>\\]+\.(?:mp4|m4v|webm|mov|mkv|mp3|m4a|aac|wav|ogg|flac|m3u8|mpd)(?:\?[^\s"'<>\\]*)?/gi;
+const RANGED_MEDIA_URL = /(googlevideo\.com|workspacevideo|\/drive\/media\/|\/videoplayback\b|\/playback\b|fbcdn\.net|fbsbx\.com|[?&](?:bytestart|byteend)=)/i;
+const EMBEDDED_MEDIA_URLS = /https?:\/\/[^\s"'<>\\]+(?:fbcdn\.net|fbsbx\.com|\.mp4|\.m4v|\.webm|\.mov|\.mkv|\.mp3|\.m4a|\.aac|\.wav|\.ogg|\.flac|\.m3u8|\.mpd)[^\s"'<>\\]*/gi;
 const SYSTEM_BROWSERS = [
   "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
   "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
@@ -200,7 +201,7 @@ function classify(url, headers = {}, ok = true) {
     return "unknown";
   }
   if (MANIFEST_TYPES.test(contentType) || MANIFEST_EXT.test(url)) return "manifest";
-  if (STREAM_MEDIA_URL.test(url) || RANGED_MEDIA_URL.test(url)) return "direct-media";
+  if (STREAM_MEDIA_URL.test(url) || RANGED_MEDIA_URL.test(url) || FACEBOOK_MEDIA_URL.test(url)) return "direct-media";
   if (MEDIA_TYPES.test(contentType) || MEDIA_EXT.test(url)) return "direct-media";
   if (/text\/html/i.test(contentType) || /\.html?(\?|#|$)/i.test(url)) return "html";
   return "unknown";
@@ -249,8 +250,21 @@ function mediaKindFromUrl(url) {
   const parsed = new URL(url);
   const mime = decodeURIComponent(parsed.searchParams.get("mime") || "");
   const itag = parsed.searchParams.get("itag") || "";
+  const path = decodeURIComponent(parsed.pathname);
   if (/^audio\//i.test(mime) || GOOGLE_AUDIO_ITAGS.has(itag)) return "audio";
   if (/^video\//i.test(mime) || GOOGLE_VIDEO_ITAGS.has(itag)) return "video";
+  if (/\.(m4a|aac|mp3|opus|oga|ogg)(?:$|[?#])/i.test(path)) return "audio";
+  if (/\.(mp4|m4v|webm|mov|mkv)(?:$|[?#])/i.test(path)) return "video";
+  return "unknown";
+}
+
+function mediaKindFromCandidate(candidate) {
+  const url = typeof candidate === "string" ? candidate : candidate.url;
+  const kind = mediaKindFromUrl(url);
+  if (kind !== "unknown") return kind;
+  const type = typeof candidate === "string" ? "" : candidate.type || "";
+  if (/^audio\//i.test(type) || /\baudio\b/i.test(type)) return "audio";
+  if (/^video\//i.test(type) || /\bvideo\b/i.test(type)) return "video";
   return "unknown";
 }
 
@@ -265,9 +279,10 @@ function isOpaqueWorkspacePlayback(url) {
 
 function candidateScore(candidate) {
   const url = candidate.url || candidate;
-  const kind = mediaKindFromUrl(url);
+  const kind = mediaKindFromCandidate(candidate);
   if (kind === "video") return 100;
   if (kind === "audio") return 80;
+  if (FACEBOOK_MEDIA_URL.test(url)) return 70;
   if (/googlevideo\.com|\/videoplayback\b/i.test(url)) return 60;
   if (MANIFEST_EXT.test(url)) return 50;
   if (isOpaqueWorkspacePlayback(url)) return -50;
@@ -730,7 +745,7 @@ async function browserScanForMedia(url, headers = requestHeaders()) {
       const responseUrl = response.url();
       const headers = response.headers();
       const contentType = headers["content-type"] || "";
-      if (MEDIA_EXT.test(responseUrl) || MANIFEST_EXT.test(responseUrl) || BROWSER_CANDIDATE_TYPES.test(contentType)) {
+      if (MEDIA_EXT.test(responseUrl) || MANIFEST_EXT.test(responseUrl) || FACEBOOK_MEDIA_URL.test(responseUrl) || BROWSER_CANDIDATE_TYPES.test(contentType)) {
         addCandidate(responseUrl, await response.request().allHeaders().catch(() => response.request().headers()), "network");
       }
       if (/(javascript|json|html|text)/i.test(contentType)) {
@@ -1575,14 +1590,14 @@ async function downloadCapturedCandidates(candidates, job) {
   candidates.sort((a, b) => candidateScore(b) - candidateScore(a));
   const actionable = candidates.filter((candidate) => !isOpaqueWorkspacePlayback(candidate.url));
   const ranged = actionable.filter((candidate) => RANGED_MEDIA_URL.test(candidate.url));
-  const videoCandidate = ranged.find((candidate) => mediaKindFromUrl(candidate.url) === "video");
-  const audioCandidate = ranged.find((candidate) => mediaKindFromUrl(candidate.url) === "audio");
+  const videoCandidate = ranged.find((candidate) => mediaKindFromCandidate(candidate) === "video");
+  const audioCandidate = ranged.find((candidate) => mediaKindFromCandidate(candidate) === "audio");
   const kinds = {
     total: candidates.length,
     ranged: ranged.length,
-    video: ranged.filter((candidate) => mediaKindFromUrl(candidate.url) === "video").length,
-    audio: ranged.filter((candidate) => mediaKindFromUrl(candidate.url) === "audio").length,
-    unknown: ranged.filter((candidate) => mediaKindFromUrl(candidate.url) === "unknown").length
+    video: ranged.filter((candidate) => mediaKindFromCandidate(candidate) === "video").length,
+    audio: ranged.filter((candidate) => mediaKindFromCandidate(candidate) === "audio").length,
+    unknown: ranged.filter((candidate) => mediaKindFromCandidate(candidate) === "unknown").length
   };
 
   if (!actionable.length) {
@@ -1609,7 +1624,7 @@ async function downloadCapturedCandidates(candidates, job) {
     const headers = mergeHeaders({ referer: new URL(candidate.url).origin, origin: new URL(candidate.url).origin }, candidate.headers);
     const result = await downloadDiscoveredCandidate({ url: candidate.url, headers }, job, headers);
     if (result.success) {
-      if (mediaKindFromUrl(candidate.url) === "audio") {
+      if (mediaKindFromCandidate(candidate) === "audio") {
         addAttempt(job, "audio-only", "failed", "Captured stream is audio-only; keep playback running and press Send all after a video stream appears.");
         continue;
       }
@@ -1628,6 +1643,10 @@ async function downloadDiscoveredCandidate(candidate, job, headers = requestHead
   const url = normalizeMediaDownloadUrl(typeof candidate === "string" ? candidate : candidate.url);
   const candidateHeaders = mergeHeaders(headers, typeof candidate === "string" ? {} : candidate.headers);
   const probe = await lightProbe(url, candidateHeaders);
+  if (!probe.ok && FACEBOOK_MEDIA_URL.test(url)) {
+    const ytdlp = await runEngine(job, "yt-dlp", () => downloadWithYtDlp(url, job, candidateHeaders));
+    if (ytdlp.success) return ytdlp;
+  }
   if (!probe.ok) return { success: false, reason: `Discovered URL returned HTTP ${probe.status}.` };
 
   if (probe.type === "direct-media") {
@@ -1635,6 +1654,10 @@ async function downloadDiscoveredCandidate(candidate, job, headers = requestHead
     if (RANGED_MEDIA_URL.test(url)) {
       const ranged = await runEngine(job, "range-downloader", () => downloadWithRanges(url, job, candidateHeaders));
       if (ranged.success) return ranged;
+    }
+    if (FACEBOOK_MEDIA_URL.test(url)) {
+      const ytdlp = await runEngine(job, "yt-dlp", () => downloadWithYtDlp(probe.finalUrl || url, job, candidateHeaders));
+      if (ytdlp.success) return ytdlp;
     }
     const aria2 = await runEngine(job, "aria2c", () => downloadWithAria2(probe.finalUrl || url, job, totalBytes, candidateHeaders));
     if (aria2.success) return aria2;
@@ -1866,7 +1889,13 @@ app.post("/api/extension-candidate", async (req, res) => {
 
   const headers = mergeHeaders({ referer: parsed.origin, origin: parsed.origin }, requestHeaders(req.body?.headers));
   const job = createDownloadJob(parsed.href, headers, req.body?.fileName);
-  downloadDiscoveredCandidate({ url: parsed.href, headers }, job, headers)
+  downloadDiscoveredCandidate({
+    url: parsed.href,
+    headers,
+    type: typeof req.body?.type === "string" ? req.body.type : "",
+    statusCode: req.body?.statusCode || "",
+    method: req.body?.method || "GET"
+  }, job, headers)
     .then((result) => {
       job.status = result.success ? "complete" : "failed";
       job.result = result;
@@ -1893,7 +1922,13 @@ app.post("/api/extension-candidates", async (req, res) => {
   const valid = candidates
     .map((item) => {
       const parsed = parseUrl(item?.url);
-      return { url: parsed ? normalizeMediaDownloadUrl(parsed.href) : null, headers: requestHeaders(item?.headers) };
+      return {
+        url: parsed ? normalizeMediaDownloadUrl(parsed.href) : null,
+        headers: requestHeaders(item?.headers),
+        type: typeof item?.type === "string" ? item.type : "",
+        statusCode: item?.statusCode || "",
+        method: item?.method || "GET"
+      };
     })
     .filter((item) => item.url);
   const deduped = [...new Map(valid.map((item) => [item.url, item])).values()];

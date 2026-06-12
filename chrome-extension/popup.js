@@ -20,6 +20,8 @@ function shortType(item) {
   if (/[?&]mime=audio/i.test(item.url)) return "Audio stream";
   if (/[?&]itag=(133|134|135|136|137|160|242|243|244|247|248|271|313|315)\b/i.test(item.url)) return "Video stream";
   if (/[?&]itag=(139|140|141|249|250|251)\b/i.test(item.url)) return "Audio stream";
+  if (/^video\//i.test(item.type) || /\bvideo\b/i.test(item.type) || /fbcdn\.net.+\.(mp4|m4v|webm)(?:[?#]|$)/i.test(item.url)) return "Video stream";
+  if (/^audio\//i.test(item.type) || /\baudio\b/i.test(item.type) || /fbcdn\.net.+\.(m4a|aac|mp3|opus|ogg)(?:[?#]|$)/i.test(item.url)) return "Audio stream";
   if (/m3u8/i.test(item.url)) return "HLS";
   if (/\.mpd/i.test(item.url)) return "DASH";
   if (/video/i.test(item.type)) return "Video";
@@ -31,6 +33,7 @@ function itemScore(item) {
   const type = shortType(item);
   if (type === "Video stream") return 100;
   if (type === "Audio stream") return 80;
+  if (/fbcdn\.net|fbsbx\.com/i.test(item.url)) return 70;
   if (/googlevideo\.com|videoplayback/i.test(item.url)) return 60;
   if (type === "HLS" || type === "DASH") return 50;
   if (type === "Opaque playback API") return -50;
@@ -49,7 +52,7 @@ function appEndpoint(path) {
 function normalizedUrl(value) {
   try {
     const url = new URL(value);
-    if (/googlevideo\.com|workspacevideo|videoplayback|\/drive\/media\/|\/playback/i.test(url.href)) {
+    if (/googlevideo\.com|workspacevideo|videoplayback|fbcdn\.net|fbsbx\.com|\/drive\/media\/|\/playback/i.test(url.href)) {
       url.searchParams.delete("range");
       url.searchParams.delete("rn");
       url.searchParams.delete("rbuf");
@@ -68,7 +71,14 @@ async function sendToApp(item) {
   const response = await fetch(appEndpoint("/api/extension-candidate"), {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ url: normalizedUrl(item.url), headers: item.headers || {}, fileName: fileNameEl.value.trim() })
+    body: JSON.stringify({
+      url: normalizedUrl(item.url),
+      headers: item.headers || {},
+      type: item.type || "",
+      statusCode: item.statusCode || "",
+      method: item.method || "GET",
+      fileName: fileNameEl.value.trim()
+    })
   });
   const data = await parseAppResponse(response);
   if (!response.ok) throw new Error(data.error || data.reason || "Local app rejected the link.");
@@ -76,7 +86,13 @@ async function sendToApp(item) {
 }
 
 async function sendAllToApp(items) {
-  const unique = [...new Map(items.map((item) => [normalizedUrl(item.url), { url: normalizedUrl(item.url), headers: item.headers || {} }])).values()];
+  const unique = [...new Map(items.map((item) => [normalizedUrl(item.url), {
+    url: normalizedUrl(item.url),
+    headers: item.headers || {},
+    type: item.type || "",
+    statusCode: item.statusCode || "",
+    method: item.method || "GET"
+  }])).values()];
   const response = await fetch(appEndpoint("/api/extension-candidates"), {
     method: "POST",
     headers: { "content-type": "application/json" },

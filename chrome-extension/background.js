@@ -1,6 +1,6 @@
 const MEDIA_URL = /\.(mp4|m4v|webm|mov|mkv|mp3|m4a|aac|wav|ogg|flac|m3u8|mpd)(\?|#|$)/i;
 const MEDIA_TYPE = /(video|audio|mpegurl|dash\+xml|mpd|octet-stream|binary)/i;
-const SUSPECT_MEDIA_URL = /(googlevideo\.com|videoplayback|\/video\/|\/media\/|\/stream|\/playback|range=|itag=|mime=video|mime=audio)/i;
+const SUSPECT_MEDIA_URL = /(googlevideo\.com|videoplayback|fbcdn\.net|fbsbx\.com|\/video\/|\/media\/|\/stream|\/playback|range=|bytestart=|byteend=|itag=|mime=video|mime=audio|\.mp4|\.m4a|\.webm|\.m3u8|\.mpd)/i;
 const MAX_ITEMS = 80;
 
 const tabItems = new Map();
@@ -77,7 +77,7 @@ async function scanActivePage(tabId) {
     target: { tabId },
     func: () => {
       const urls = new Set();
-      const suspect = /(googlevideo\.com|videoplayback|\.mp4|\.webm|\.m3u8|\.mpd|mime=video|mime=audio|\/video\/|\/media\/|\/stream|\/playback)/i;
+      const suspect = /(googlevideo\.com|videoplayback|fbcdn\.net|fbsbx\.com|\.mp4|\.m4a|\.webm|\.m3u8|\.mpd|mime=video|mime=audio|bytestart=|byteend=|\/video\/|\/media\/|\/stream|\/playback)/i;
 
       for (const entry of performance.getEntriesByType("resource")) {
         if (entry?.name && suspect.test(entry.name)) urls.add(entry.name);
@@ -92,7 +92,7 @@ async function scanActivePage(tabId) {
 
       for (const script of document.scripts) {
         const text = script.textContent || "";
-        for (const match of text.matchAll(/https?:\/\/[^\s"'<>\\]+(?:videoplayback|googlevideo|\.mp4|\.webm|\.m3u8|\.mpd)[^\s"'<>\\]*/gi)) {
+        for (const match of text.matchAll(/https?:\/\/[^\s"'<>\\]+(?:videoplayback|googlevideo|fbcdn\.net|fbsbx\.com|\.mp4|\.m4a|\.webm|\.m3u8|\.mpd)[^\s"'<>\\]*/gi)) {
           urls.add(match[0]);
         }
       }
