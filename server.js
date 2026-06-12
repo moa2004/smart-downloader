@@ -74,7 +74,12 @@ async function copyBundledTool(name, sourcePath) {
 async function prepareBundledTools() {
   await mkdir(BUNDLED_TOOL_DIR, { recursive: true });
   await copyBundledTool("ffmpeg", safeRequire("ffmpeg-static"));
-  await copyBundledTool("yt-dlp", safeRequire("yt-dlp-exec/src/constants")?.YOUTUBE_DL_PATH);
+  const ytDlpFile = process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp";
+  await copyBundledTool(
+    "yt-dlp",
+    safeRequire("yt-dlp-exec/src/constants")?.YOUTUBE_DL_PATH ||
+      path.join(process.cwd(), "node_modules", "yt-dlp-exec", "bin", ytDlpFile)
+  );
   const aria2Path = process.platform === "linux" && process.arch === "x64"
     ? path.join(process.cwd(), "node_modules", "@naria2", "linux-x64", "aria2c")
     : null;
