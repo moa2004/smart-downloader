@@ -7,6 +7,11 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "express": "^4.19.2"
+    "express": "^4.19.2",
+    "ffmpeg-static": "^5.3.0",
+    "yt-dlp-exec": "^1.0.2"
+  },
+  "optionalDependencies": {
+    "@naria2/linux-x64": "1.37.0-beta.0"
   }
 }

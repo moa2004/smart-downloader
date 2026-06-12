@@ -3,12 +3,14 @@ import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 import { spawn } from "node:child_process";
 import { createReadStream, createWriteStream } from "node:fs";
-import { access, mkdir, open as openFile, readdir, stat, unlink } from "node:fs/promises";
+import { access, chmod, copyFile, mkdir, open as openFile, readdir, stat, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { createRequire } from "node:module";
 
 const app = express();
+const require = createRequire(import.meta.url);
 const PORT = process.env.PORT || 5177;
 const MAX_TEXT_BYTES = 2_000_000;
 const REQUEST_TIMEOUT_MS = 12000;
@@ -26,6 +28,7 @@ const MAX_DEEP_TARGETS = 8;
 const DOWNLOAD_DIR = process.env.VERCEL ? path.join(tmpdir(), "smart-downloader") : path.join(process.cwd(), "downloads");
 const TOOL_DIR = process.env.VERCEL ? path.join(tmpdir(), "smart-downloader-tools", "bin") : path.join(process.cwd(), "tools", "bin");
 const BROWSER_PROFILE_DIR = process.env.VERCEL ? path.join(tmpdir(), "smart-downloader-browser-profile") : path.join(process.cwd(), "tools", "browser-profile");
+const BUNDLED_TOOL_DIR = path.join(tmpdir(), "smart-downloader-bundled-tools");
 const MEDIA_TYPES = /^(video|audio)\//i;
 const MANIFEST_TYPES = /(mpegurl|x-mpegurl|dash\+xml|mpd|vnd\.apple\.mpegurl)/i;
 const MEDIA_EXT = /\.(mp4|m4v|webm|mov|mkv|mp3|m4a|aac|wav|ogg|flac)(\?|#|$)/i;
@@ -47,11 +50,44 @@ app.use(express.static("public"));
 
 const completedDownloads = new Map();
 const downloadJobs = new Map();
+const bundledTools = {};
 
 await mkdir(DOWNLOAD_DIR, { recursive: true });
 await mkdir(TOOL_DIR, { recursive: true });
 await mkdir(BROWSER_PROFILE_DIR, { recursive: true });
-process.env.PATH = `${TOOL_DIR}${path.delimiter}${process.env.PATH || ""}`;
+await prepareBundledTools();
+process.env.PATH = `${BUNDLED_TOOL_DIR}${path.delimiter}${TOOL_DIR}${path.delimiter}${process.env.PATH || ""}`;
+
+async function copyBundledTool(name, sourcePath) {
+  if (!sourcePath) return;
+  const ext = sourcePath.endsWith(".exe") || (process.platform === "win32" && !sourcePath.endsWith(".exe")) ? ".exe" : "";
+  const target = path.join(BUNDLED_TOOL_DIR, `${name}${ext}`);
+  try {
+    await access(sourcePath);
+    await copyFile(sourcePath, target);
+    if (process.platform !== "win32") await chmod(target, 0o755).catch(() => {});
+    bundledTools[name] = target;
+  } catch {
+  }
+}
+
+async function prepareBundledTools() {
+  await mkdir(BUNDLED_TOOL_DIR, { recursive: true });
+  await copyBundledTool("ffmpeg", safeRequire("ffmpeg-static"));
+  await copyBundledTool("yt-dlp", safeRequire("yt-dlp-exec/src/constants")?.YOUTUBE_DL_PATH);
+  const aria2Path = process.platform === "linux" && process.arch === "x64"
+    ? path.join(process.cwd(), "node_modules", "@naria2", "linux-x64", "aria2c")
+    : null;
+  await copyBundledTool("aria2c", aria2Path);
+}
+
+function safeRequire(id) {
+  try {
+    return require(id);
+  } catch {
+    return null;
+  }
+}
 
 function parseUrl(value) {
   try {
@@ -294,10 +330,19 @@ function fileUrl(id) {
 }
 
 function publicToolName(name) {
+  if (bundledTools[name]) return bundledTools[name];
   return process.platform === "win32" ? `${name}.exe` : name;
 }
 
 async function commandExists(command) {
+  if (path.isAbsolute(command)) {
+    try {
+      await access(command);
+      return true;
+    } catch {
+      return false;
+    }
+  }
   const check = process.platform === "win32" ? "where.exe" : "which";
   return new Promise((resolve) => {
     const child = spawn(check, [command], { windowsHide: true });
