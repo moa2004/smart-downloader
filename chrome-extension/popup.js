@@ -4,7 +4,7 @@ const fileNameEl = document.querySelector("#fileName");
 const appUrlEl = document.querySelector("#appUrl");
 let activeTabId = null;
 let currentItems = [];
-let appBaseUrl = "https://moa2004-smart-downloader.onrender.com";
+let appBaseUrl = "https://smart-downloader.vercel.app";
 
 function escapeHtml(value) {
   return String(value)
@@ -169,7 +169,7 @@ async function loadSettings() {
 }
 
 appUrlEl.addEventListener("change", async () => {
-  appBaseUrl = appUrlEl.value.trim() || "https://moa2004-smart-downloader.onrender.com";
+  appBaseUrl = appUrlEl.value.trim() || "https://smart-downloader.vercel.app";
   await chrome.storage.local.set({ appBaseUrl });
   setStatus("App address saved.");
 });

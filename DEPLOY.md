@@ -1,14 +1,14 @@
 # Smart Downloader Deploy
 
-## Render
+## Vercel
 
-1. Open the Render deploy link from `README.md`.
-2. Sign in with GitHub. Render's free web service can be created without adding credit.
-3. Keep the Blueprint settings from `render.yaml`.
-4. Deploy the service named `moa2004-smart-downloader`.
-5. After deploy, the app should be available at `https://moa2004-smart-downloader.onrender.com`.
+1. Open the Vercel deploy link from `README.md`.
+2. Sign in with GitHub and import the repository.
+3. Use the project name `smart-downloader` if it is available.
+4. Deploy on the Hobby plan.
+5. After deploy, open the Chrome extension and set `App address` to the Vercel URL if it differs from `https://smart-downloader.vercel.app`.
 
-This is the permanent deploy path. Temporary local tunnel links stop when the local machine stops.
+This no-card path uses Vercel serverless functions. It supports the Node-based captured-link and range download paths, but Docker-only tools such as ffmpeg, aria2c, yt-dlp, and Playwright are not available there.
 
 ## Local
 

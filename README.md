@@ -9,14 +9,14 @@ app_port: 5177
 
 # Smart Downloader
 
-A Docker-ready media download helper with a Chrome extension companion.
+A media download helper with a Chrome extension companion.
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/moa2004/smart-downloader)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/moa2004/smart-downloader)
 
-Default Render URL after Blueprint deploy:
+Default Vercel URL if you use the project name `smart-downloader`:
 
 ```text
-https://moa2004-smart-downloader.onrender.com
+https://smart-downloader.vercel.app
 ```
 
 ## Local

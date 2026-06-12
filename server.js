@@ -4,9 +4,9 @@ import { Readable } from "node:stream";
 import { spawn } from "node:child_process";
 import { createReadStream, createWriteStream } from "node:fs";
 import { access, mkdir, open as openFile, readdir, stat, unlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { chromium } from "playwright";
 
 const app = express();
 const PORT = process.env.PORT || 5177;
@@ -23,7 +23,7 @@ const QUERY_RANGE_CONCURRENCY = 5;
 const GOOGLE_AUDIO_ITAGS = new Set(["139", "140", "141", "249", "250", "251"]);
 const GOOGLE_VIDEO_ITAGS = new Set(["133", "134", "135", "136", "137", "160", "242", "243", "244", "247", "248", "271", "313", "315"]);
 const MAX_DEEP_TARGETS = 8;
-const DOWNLOAD_DIR = path.join(process.cwd(), "downloads");
+const DOWNLOAD_DIR = process.env.VERCEL ? path.join(tmpdir(), "smart-downloader") : path.join(process.cwd(), "downloads");
 const TOOL_DIR = path.join(process.cwd(), "tools", "bin");
 const BROWSER_PROFILE_DIR = path.join(process.cwd(), "tools", "browser-profile");
 const MEDIA_TYPES = /^(video|audio)\//i;
@@ -720,6 +720,8 @@ async function scanExposure(detail, headers) {
 }
 
 async function browserScanForMedia(url, headers = requestHeaders()) {
+  if (process.env.VERCEL) return [];
+  const { chromium } = await import("playwright");
   const executablePath = await findSystemBrowser();
   const candidates = new Map();
   const addCandidate = (candidateUrl, candidateHeaders = {}, source = "browser") => {
@@ -1797,11 +1799,13 @@ app.get("/api/tools", async (_req, res) => {
 });
 
 app.post("/api/session-browser", async (req, res) => {
+  if (process.env.VERCEL) return res.status(501).json({ error: "Session browser is not available on this host." });
   const parsed = parseUrl(req.body?.url);
   if (!parsed) return res.status(400).json({ error: "Enter a valid http(s) URL." });
 
   const executablePath = await findSystemBrowser();
   try {
+    const { chromium } = await import("playwright");
     const context = await chromium.launchPersistentContext(BROWSER_PROFILE_DIR, {
       headless: false,
       executablePath: executablePath || undefined,
@@ -1992,6 +1996,10 @@ app.get("/api/download", async (req, res) => {
   }
 });
 
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Media Guard Auditor running on port ${PORT}`);
-});
+if (!process.env.VERCEL) {
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Media Guard Auditor running on port ${PORT}`);
+  });
+}
+
+export default app;

@@ -30,6 +30,7 @@ RUN curl -L "https://github.com/nilaoda/N_m3u8DL-RE/releases/download/v0.5.1-bet
 COPY package*.json ./
 RUN npm ci
 
+RUN npm install --no-save playwright@1.60.0
 RUN npx playwright install --with-deps chromium
 
 COPY . .
