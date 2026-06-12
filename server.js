@@ -3,7 +3,7 @@ import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 import { spawn } from "node:child_process";
 import { createReadStream, createWriteStream } from "node:fs";
-import { access, chmod, copyFile, mkdir, open as openFile, readdir, stat, unlink } from "node:fs/promises";
+import { access, chmod, copyFile, mkdir, open as openFile, readdir, stat, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -84,6 +84,8 @@ async function prepareBundledTools() {
     ? path.join(process.cwd(), "node_modules", "@naria2", "linux-x64", "aria2c")
     : null;
   await copyBundledTool("aria2c", aria2Path);
+  await createNodeToolWrapper("N_m3u8DL-RE", path.join(process.cwd(), "node_modules", "@javagt", "n-m3u8dl-re", "dist", "cli", "index.js"));
+  await createNodeToolWrapper("ipull", path.join(process.cwd(), "node_modules", "ipull", "dist", "cli", "cli.js"));
 }
 
 function safeRequire(id) {
@@ -91,6 +93,18 @@ function safeRequire(id) {
     return require(id);
   } catch {
     return null;
+  }
+}
+
+async function createNodeToolWrapper(name, scriptPath) {
+  if (process.platform === "win32") return;
+  try {
+    await access(scriptPath);
+    const target = path.join(BUNDLED_TOOL_DIR, name);
+    await writeFile(target, `#!/bin/sh\nexec node "${scriptPath}" "$@"\n`);
+    await chmod(target, 0o755).catch(() => {});
+    bundledTools[name] = target;
+  } catch {
   }
 }
 
@@ -366,6 +380,7 @@ async function toolStatus() {
     lux: publicToolName("lux"),
     "you-get": publicToolName("you-get"),
     "gallery-dl": publicToolName("gallery-dl"),
+    ipull: publicToolName("ipull"),
     "browser-scan": publicToolName("chrome"),
     ffmpeg: publicToolName("ffmpeg"),
     streamlink: publicToolName("streamlink")
@@ -1164,6 +1179,50 @@ async function downloadWithGalleryDl(url, job = null, headers = requestHeaders()
   };
 }
 
+async function downloadWithIpull(url, job = null, totalBytes = null, _headers = requestHeaders()) {
+  const command = publicToolName("ipull");
+  if (!(await commandExists(command))) return { success: false, reason: "ipull is not installed or not available." };
+
+  const id = randomUUID();
+  const originalName = jobFileName(job, mediaFileNameFromUrl(url, `${id}.mp4`), extFromFileName(mediaFileNameFromUrl(url, ""), "mp4"));
+  const outputPath = path.join(DOWNLOAD_DIR, `${id}-${originalName}`);
+  const stopProgress = startFileProgress(job, "ipull", { filePath: outputPath, totalBytes });
+  const result = await runProcess(command, [
+    url,
+    "--save",
+    outputPath,
+    "--connections",
+    "8",
+    "--program",
+    "chunks",
+    "--style",
+    "summary"
+  ], DIRECT_TIMEOUT_MS);
+  stopProgress();
+
+  const info = await stat(outputPath).catch(() => null);
+  if (!result.ok || !info?.isFile() || info.size === 0 || info.size > MAX_DOWNLOAD_BYTES || isSuspiciousPartial(url, info.size)) {
+    await unlink(outputPath).catch(() => {});
+    return {
+      success: false,
+      reason: isSuspiciousPartial(url, info?.size) ? "ipull only downloaded a tiny partial media chunk, not the full video." : "ipull could not download this direct media URL.",
+      detail: result.stderr || result.stdout
+    };
+  }
+
+  completedDownloads.set(id, { path: outputPath, fileName: originalName, size: info.size, engine: "ipull" });
+  updateAttemptProgress(job, "ipull", progressFromBytes(info.size, totalBytes || info.size));
+  return {
+    success: true,
+    source: "ipull",
+    targetUrl: url,
+    fileName: originalName,
+    fileSize: info.size,
+    downloadUrl: fileUrl(id),
+    message: "ipull downloaded and prepared the media file."
+  };
+}
+
 async function downloadWithCurl(url, job = null, totalBytes = null, headers = requestHeaders()) {
   const command = publicToolName("curl");
   if (!(await commandExists(command))) return { success: false, reason: "curl is not installed or not in PATH." };
@@ -1713,6 +1772,8 @@ async function downloadDiscoveredCandidate(candidate, job, headers = requestHead
     }
     const aria2 = await runEngine(job, "aria2c", () => downloadWithAria2(probe.finalUrl || url, job, totalBytes, candidateHeaders));
     if (aria2.success) return aria2;
+    const ipull = await runEngine(job, "ipull", () => downloadWithIpull(probe.finalUrl || url, job, totalBytes, candidateHeaders));
+    if (ipull.success) return ipull;
     const curl = await runEngine(job, "curl", () => downloadWithCurl(probe.finalUrl || url, job, totalBytes, candidateHeaders));
     if (curl.success) return curl;
     const wget = await runEngine(job, "wget", () => downloadWithWget(probe.finalUrl || url, job, totalBytes, candidateHeaders));
@@ -1741,6 +1802,9 @@ async function advancedDownloadAttempt(url, job = null, headers = requestHeaders
     const aria2 = await runEngine(job, "aria2c", () => downloadWithAria2(basic.targetUrl, job, totalBytes, headers));
     if (aria2.success) return aria2;
 
+    const ipull = await runEngine(job, "ipull", () => downloadWithIpull(basic.targetUrl, job, totalBytes, headers));
+    if (ipull.success) return ipull;
+
     const curl = await runEngine(job, "curl", () => downloadWithCurl(basic.targetUrl, job, totalBytes, headers));
     if (curl.success) return curl;
 
@@ -1754,6 +1818,7 @@ async function advancedDownloadAttempt(url, job = null, headers = requestHeaders
       downloadUrl: `/api/download?url=${encodeURIComponent(basic.targetUrl)}`,
       engines: {
         direct: "Direct media proxy is available.",
+        ipull: ipull.reason,
         curl: curl.reason,
         aria2c: aria2.reason,
         wget: wget.reason
