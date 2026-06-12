@@ -7,11 +7,7 @@
   ],
   "functions": {
     "api/index.js": {
-      "includeFiles": [
-        "node_modules/ffmpeg-static/**",
-        "node_modules/yt-dlp-exec/**",
-        "node_modules/@naria2/linux-x64/**"
-      ]
+      "includeFiles": "{node_modules/ffmpeg-static/**,node_modules/yt-dlp-exec/**,node_modules/@naria2/linux-x64/**}"
     }
   }
 }
