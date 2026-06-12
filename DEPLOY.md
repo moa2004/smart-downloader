@@ -2,12 +2,11 @@
 
 ## Render
 
-1. Push this folder to a Git repository.
-2. Create a new Render Web Service from the repository.
-3. Choose Docker as the environment.
-4. Name the service `smart-downloader`.
-5. Keep the exposed port as `5177`; the app also reads Render's `PORT` automatically.
-6. After deploy, open the Chrome extension and change `App address` to your live URL.
+1. Open the Render deploy link from `README.md`.
+2. Sign in with GitHub. Render's free web service can be created without adding credit.
+3. Keep the Blueprint settings from `render.yaml`.
+4. Deploy the service named `moa2004-smart-downloader`.
+5. After deploy, the app should be available at `https://moa2004-smart-downloader.onrender.com`.
 
 This is the permanent deploy path. Temporary local tunnel links stop when the local machine stops.
 

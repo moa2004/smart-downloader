@@ -1992,6 +1992,6 @@ app.get("/api/download", async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Media Guard Auditor running at http://localhost:${PORT}`);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Media Guard Auditor running on port ${PORT}`);
 });

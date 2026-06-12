@@ -4,7 +4,7 @@ const fileNameEl = document.querySelector("#fileName");
 const appUrlEl = document.querySelector("#appUrl");
 let activeTabId = null;
 let currentItems = [];
-let appBaseUrl = "https://moamen-111-smart-downloader-app.hf.space";
+let appBaseUrl = "https://moa2004-smart-downloader.onrender.com";
 
 function escapeHtml(value) {
   return String(value)
@@ -169,7 +169,7 @@ async function loadSettings() {
 }
 
 appUrlEl.addEventListener("change", async () => {
-  appBaseUrl = appUrlEl.value.trim() || "https://moamen-111-smart-downloader-app.hf.space";
+  appBaseUrl = appUrlEl.value.trim() || "https://moa2004-smart-downloader.onrender.com";
   await chrome.storage.local.set({ appBaseUrl });
   setStatus("App address saved.");
 });

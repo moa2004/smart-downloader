@@ -1,11 +1,11 @@
 services:
   - type: web
-    name: smart-downloader
+    name: moa2004-smart-downloader
     runtime: docker
     repo: https://github.com/moa2004/smart-downloader
     branch: main
     plan: free
     region: frankfurt
     dockerfilePath: ./Dockerfile
-    autoDeployTrigger: "off"
+    autoDeployTrigger: commit
     healthCheckPath: /api/tools

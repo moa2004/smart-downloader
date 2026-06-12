@@ -13,6 +13,12 @@ A Docker-ready media download helper with a Chrome extension companion.
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/moa2004/smart-downloader)
 
+Default Render URL after Blueprint deploy:
+
+```text
+https://moa2004-smart-downloader.onrender.com
+```
+
 ## Local
 
 ```bash
