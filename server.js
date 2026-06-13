@@ -14,6 +14,7 @@ const require = createRequire(import.meta.url);
 const PORT = process.env.PORT || 5177;
 const MAX_TEXT_BYTES = 2_000_000;
 const REQUEST_TIMEOUT_MS = 12000;
+const RANGE_REQUEST_TIMEOUT_MS = 45000;
 const PROCESS_TIMEOUT_MS = 120000;
 const DIRECT_TIMEOUT_MS = 60000;
 const QUICK_STREAM_TIMEOUT_MS = 25000;
@@ -21,7 +22,7 @@ const BROWSER_SCAN_TIMEOUT_MS = 35000;
 const MAX_DOWNLOAD_BYTES = 2 * 1024 * 1024 * 1024;
 const MIN_STREAM_MEDIA_BYTES = 64 * 1024;
 const QUERY_RANGE_CHUNK_BYTES = 4 * 1024 * 1024;
-const QUERY_RANGE_CONCURRENCY = 5;
+const QUERY_RANGE_CONCURRENCY = process.env.VERCEL ? 8 : 6;
 const GOOGLE_AUDIO_ITAGS = new Set(["139", "140", "141", "249", "250", "251"]);
 const GOOGLE_VIDEO_ITAGS = new Set(["133", "134", "135", "136", "137", "160", "242", "243", "244", "247", "248", "271", "313", "315"]);
 const MAX_DEEP_TARGETS = 8;
@@ -231,11 +232,13 @@ function cookieHeaderFromCookies(cookies = []) {
 
 async function fetchWithTimeout(url, options = {}) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeoutMs = options.timeoutMs || REQUEST_TIMEOUT_MS;
+  const { timeoutMs: _timeoutMs, ...fetchOptions } = options;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(url, {
       redirect: "follow",
-      ...options,
+      ...fetchOptions,
       signal: controller.signal
     });
   } finally {
@@ -1411,39 +1414,53 @@ async function downloadWithRanges(url, job = null, headers = requestHeaders(), e
   }
 
   const total = contentRange.total;
-  const chunkSize = 4 * 1024 * 1024;
-  const output = createWriteStream(outputPath);
+  const chunkSize = QUERY_RANGE_CHUNK_BYTES;
+  const ranges = [];
+  for (let start = 0; start < total; start += chunkSize) {
+    ranges.push({ start, end: Math.min(total - 1, start + chunkSize - 1) });
+  }
+
+  const file = await openFile(outputPath, "w");
   let downloaded = 0;
+  let nextIndex = 0;
 
-  try {
-    for (let start = 0; start < total; start += chunkSize) {
-      const end = Math.min(total - 1, start + chunkSize - 1);
-      let response = null;
-      let lastError = null;
-      for (let attempt = 0; attempt < 3; attempt++) {
-        response = await fetchWithTimeout(url, { headers: { ...headers, range: `bytes=${start}-${end}` } }).catch((error) => {
-          lastError = error;
-          return null;
-        });
-        if (response?.status === 206 && response.body) break;
-        response = null;
-        await new Promise((resolve) => setTimeout(resolve, 350 * (attempt + 1)));
-      }
-      if (!response) throw new Error(lastError?.message || `Range ${start}-${end} failed.`);
+  async function fetchRangeBuffer(start, end) {
+    let lastError = null;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const response = await fetchWithTimeout(url, {
+        headers: { ...headers, range: `bytes=${start}-${end}` },
+        timeoutMs: RANGE_REQUEST_TIMEOUT_MS
+      }).catch((error) => {
+        lastError = error;
+        return null;
+      });
+      if (response?.status === 206 && response.body) return Buffer.from(await response.arrayBuffer());
+      lastError = new Error(response ? `HTTP ${response.status}` : lastError?.message || "Request failed");
+      await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
+    }
+    throw new Error(lastError?.message || `Range ${start}-${end} failed.`);
+  }
 
-      await pipeResponseToFile(response, output);
-      downloaded = end + 1;
+  async function worker() {
+    while (nextIndex < ranges.length) {
+      const range = ranges[nextIndex++];
+      const buffer = await fetchRangeBuffer(range.start, range.end);
+      await file.write(buffer, 0, buffer.length, range.start);
+      downloaded += buffer.length;
       updateAttemptProgress(job, engineName, progressFromBytes(downloaded, total));
     }
+  }
+
+  try {
+    const workers = Array.from({ length: Math.min(QUERY_RANGE_CONCURRENCY, ranges.length) }, () => worker());
+    await Promise.all(workers);
   } catch (error) {
-    output.destroy();
+    await file.close().catch(() => {});
     await unlink(outputPath).catch(() => {});
     return { success: false, reason: `Range downloader failed: ${error.message}` };
   }
 
-  await new Promise((resolve, reject) => {
-    output.end((error) => (error ? reject(error) : resolve()));
-  });
+  await file.close().catch(() => {});
 
   const info = await stat(outputPath).catch(() => null);
   if (!info?.isFile() || info.size < MIN_STREAM_MEDIA_BYTES) {
@@ -1474,7 +1491,7 @@ async function downloadWithQueryRanges(url, job = null, headers = requestHeaders
   const expectedTotal = Number(new URL(url).searchParams.get("clen") || 0) || null;
 
   const firstUrl = queryRangeUrl(url, 0, QUERY_RANGE_CHUNK_BYTES - 1);
-  const first = await fetchWithTimeout(firstUrl, { headers }).catch((error) => ({ error }));
+  const first = await fetchWithTimeout(firstUrl, { headers, timeoutMs: RANGE_REQUEST_TIMEOUT_MS }).catch((error) => ({ error }));
   if (first.error || !first.ok || !first.body) {
     return { success: false, reason: `Query-range probe failed: ${first.error?.message || `HTTP ${first.status}`}` };
   }
@@ -1502,13 +1519,20 @@ async function downloadWithQueryRanges(url, job = null, headers = requestHeaders
 
   try {
     while (nextStart < (finalTotal || MAX_DOWNLOAD_BYTES)) {
-      const start = nextStart;
-      const end = Math.min((finalTotal || MAX_DOWNLOAD_BYTES) - 1, start + QUERY_RANGE_CHUNK_BYTES - 1);
+      const batch = [];
+      for (let i = 0; i < QUERY_RANGE_CONCURRENCY && nextStart < (finalTotal || MAX_DOWNLOAD_BYTES); i++) {
+        const start = nextStart;
+        const end = Math.min((finalTotal || MAX_DOWNLOAD_BYTES) - 1, start + QUERY_RANGE_CHUNK_BYTES - 1);
+        batch.push({ start, end });
+        nextStart += QUERY_RANGE_CHUNK_BYTES;
+      }
+
+      const buffers = await Promise.all(batch.map(async ({ start, end }) => {
       let response = null;
       let buffer = null;
 
       for (let attempt = 0; attempt < 3; attempt++) {
-        response = await fetchWithTimeout(queryRangeUrl(url, start, end), { headers }).catch((error) => {
+        response = await fetchWithTimeout(queryRangeUrl(url, start, end), { headers, timeoutMs: RANGE_REQUEST_TIMEOUT_MS }).catch((error) => {
           failures.push(error.message);
           return null;
         });
@@ -1520,17 +1544,27 @@ async function downloadWithQueryRanges(url, job = null, headers = requestHeaders
       }
 
       if (!buffer || buffer.length === 0) {
-        finalTotal ||= start;
-        break;
+        return { start, buffer: null };
       }
 
-      await writeChunk(start, buffer, finalTotal);
-      if (buffer.length < QUERY_RANGE_CHUNK_BYTES) {
-        finalTotal ||= start + buffer.length;
-        updateAttemptProgress(job, engineName, progressFromBytes(finalTotal, finalTotal));
-        break;
+      return { start, buffer };
+      }));
+
+      let shouldStop = false;
+      for (const { start, buffer } of buffers) {
+        if (!buffer || buffer.length === 0) {
+          finalTotal ||= start;
+          shouldStop = true;
+          continue;
+        }
+        await writeChunk(start, buffer, finalTotal);
+        if (buffer.length < QUERY_RANGE_CHUNK_BYTES) {
+          finalTotal ||= start + buffer.length;
+          updateAttemptProgress(job, engineName, progressFromBytes(finalTotal, finalTotal));
+          shouldStop = true;
+        }
       }
-      nextStart += QUERY_RANGE_CHUNK_BYTES;
+      if (shouldStop) break;
     }
   } catch (error) {
     failures.push(error.message);
@@ -1723,9 +1757,11 @@ async function downloadCapturedCandidates(candidates, job) {
     addAttempt(job, "capture-pair", "running", "Found separate video and audio streams.");
     const videoHeaders = mergeHeaders({ referer: new URL(videoCandidate.url).origin, origin: new URL(videoCandidate.url).origin }, videoCandidate.headers);
     const audioHeaders = mergeHeaders({ referer: new URL(audioCandidate.url).origin, origin: new URL(audioCandidate.url).origin }, audioCandidate.headers);
-    const video = await runEngine(job, "video-download", () => downloadWithRanges(videoCandidate.url, job, videoHeaders, "video-download"));
+    const [video, audio] = await Promise.all([
+      runEngine(job, "video-download", () => downloadWithRanges(videoCandidate.url, job, videoHeaders, "video-download")),
+      runEngine(job, "audio-download", () => downloadWithRanges(audioCandidate.url, job, audioHeaders, "audio-download"))
+    ]);
     if (!video.success) return video;
-    const audio = await runEngine(job, "audio-download", () => downloadWithRanges(audioCandidate.url, job, audioHeaders, "audio-download"));
     if (!audio.success) return audio;
     return muxAudioVideo(video, audio, job);
   }
