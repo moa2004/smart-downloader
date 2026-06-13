@@ -4,6 +4,8 @@ const fileNameEl = document.querySelector("#fileName");
 const appUrlEl = document.querySelector("#appUrl");
 let activeTabId = null;
 let currentItems = [];
+let currentPageUrl = "";
+let currentPageTitle = "";
 let appBaseUrl = "https://smart-downloader-eight.vercel.app";
 
 function escapeHtml(value) {
@@ -77,6 +79,8 @@ async function sendToApp(item) {
       type: item.type || "",
       statusCode: item.statusCode || "",
       method: item.method || "GET",
+      pageUrl: currentPageUrl,
+      pageTitle: currentPageTitle,
       fileName: fileNameEl.value.trim()
     })
   });
@@ -96,7 +100,7 @@ async function sendAllToApp(items) {
   const response = await fetch(appEndpoint("/api/extension-candidates"), {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ candidates: unique, fileName: fileNameEl.value.trim() })
+    body: JSON.stringify({ candidates: unique, pageUrl: currentPageUrl, pageTitle: currentPageTitle, fileName: fileNameEl.value.trim() })
   });
   const data = await parseAppResponse(response);
   if (!response.ok) throw new Error(data.error || data.reason || "Local app rejected the links.");
@@ -159,6 +163,8 @@ async function load() {
   await chrome.runtime.sendMessage({ type: "scan-active-page" }).catch(() => null);
   const response = await chrome.runtime.sendMessage({ type: "get-items" });
   activeTabId = response.tabId;
+  currentPageUrl = response.pageUrl || "";
+  currentPageTitle = response.pageTitle || "";
   render(response.items || []);
 }
 

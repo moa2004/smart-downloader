@@ -366,6 +366,14 @@ function isOpaqueWorkspacePlayback(url) {
   return /workspacevideo|\/drive\/media\/.+\/playback/i.test(parsed.href) && !parsed.searchParams.get("mime") && !parsed.searchParams.get("itag");
 }
 
+function pageExtractorPriority(url = "") {
+  return /(facebook\.com|fb\.watch|instagram\.com|tiktok\.com|youtube\.com|youtu\.be|x\.com|twitter\.com|vimeo\.com)/i.test(url);
+}
+
+function headersFromCandidates(candidates = []) {
+  return candidates.reduce((headers, candidate) => mergeHeaders(headers, candidate.headers), requestHeaders());
+}
+
 function candidateScore(candidate) {
   const url = candidate.url || candidate;
   const kind = mediaKindFromCandidate(candidate);
@@ -1039,6 +1047,55 @@ async function downloadWithYtDlp(url, job = null, headers = requestHeaders()) {
     downloadUrl: fileUrl(id),
     message: "yt-dlp downloaded and prepared the media file."
   };
+}
+
+async function downloadPageWithYtDlpRemote(url, job = null, headers = requestHeaders()) {
+  const command = publicToolName("yt-dlp");
+  if (!(await commandExists(command))) return { success: false, reason: "yt-dlp is not installed or not in PATH." };
+
+  const result = await runProcess(command, [
+    "--no-playlist",
+    "--no-warnings",
+    "--get-url",
+    "-f",
+    "bv*+ba/best",
+    ...ytDlpHeaderArgs(headers),
+    url
+  ], PROCESS_TIMEOUT_MS);
+
+  if (!result.ok) {
+    return { success: false, reason: "yt-dlp could not extract full page media URLs.", detail: result.stderr || result.stdout };
+  }
+
+  const urls = result.stdout.split(/\r?\n/).map((line) => line.trim()).filter((line) => /^https?:\/\//i.test(line));
+  if (urls.length >= 2) {
+    const video = { url: urls[0], headers, type: "video" };
+    const audio = { url: urls[1], headers, type: "audio" };
+    return muxRemoteAudioVideo(video, audio, headers, headers, job);
+  }
+
+  if (urls.length === 1) {
+    const id = randomUUID();
+    const fileName = forceFileExtension(job?.fileName || `${id}.mp4`, "mp4");
+    completedDownloads.set(id, {
+      type: "remote-direct",
+      fileName,
+      url: urls[0],
+      headers,
+      engine: "yt-dlp-page"
+    });
+    return {
+      success: true,
+      source: "yt-dlp-page",
+      targetUrl: url,
+      fileName,
+      fileSize: null,
+      downloadUrl: fileUrl(id, fileName),
+      message: "Ready to stream the full page media URL without using server disk."
+    };
+  }
+
+  return { success: false, reason: "yt-dlp did not return media URLs for this page." };
 }
 
 async function downloadWithNM3u8DL(url, job = null, timeoutMs = PROCESS_TIMEOUT_MS, headers = requestHeaders()) {
@@ -1865,7 +1922,7 @@ async function muxRemoteAudioVideo(videoCandidate, audioCandidate, videoHeaders,
   };
 }
 
-async function downloadCapturedCandidates(candidates, job) {
+async function downloadCapturedCandidates(candidates, job, pageUrl = "") {
   candidates.sort((a, b) => candidateScore(b) - candidateScore(a));
   const actionable = candidates.filter((candidate) => !isOpaqueWorkspacePlayback(candidate.url));
   const ranged = actionable.filter((candidate) => RANGED_MEDIA_URL.test(candidate.url));
@@ -1885,6 +1942,23 @@ async function downloadCapturedCandidates(candidates, job) {
       reason: `Only opaque Google Workspace playback API links were captured. Keep playback running and seek until Chrome emits googlevideo/videoplayback URLs with mime or itag. Captured: ${kinds.total}.`,
       engines: { extension: "Captured only opaque playback control endpoints, not media streams." }
     };
+  }
+
+  const inferredPageUrl = pageUrl || actionable.map((candidate) => candidate.headers?.referer || candidate.headers?.referrer || "").find((value) => parseUrl(value) && pageExtractorPriority(value)) || "";
+  const parsedPage = parseUrl(inferredPageUrl);
+  if (parsedPage && pageExtractorPriority(parsedPage.href)) {
+    const pageHeaders = mergeHeaders(
+      { referer: parsedPage.href, origin: parsedPage.origin },
+      headersFromCandidates(actionable)
+    );
+    addAttempt(job, "page-extractor", "running", `Trying full page URL: ${parsedPage.href}`);
+    const pageResult = await runEngine(job, "yt-dlp-page", () => (
+      process.env.VERCEL
+        ? downloadPageWithYtDlpRemote(parsedPage.href, job, pageHeaders)
+        : downloadWithYtDlp(parsedPage.href, job, pageHeaders)
+    ));
+    if (pageResult.success) return { ...pageResult, source: "yt-dlp-page" };
+    addAttempt(job, "page-extractor", "failed", pageResult.reason || "Page extractor did not produce a full video.");
   }
 
   if (videoCandidate && audioCandidate) {
@@ -2180,16 +2254,18 @@ app.post("/api/extension-candidate", async (req, res) => {
   res.setHeader("access-control-allow-origin", "*");
   const parsed = parseUrl(req.body?.url);
   if (!parsed) return res.status(400).json({ error: "Enter a valid http(s) URL." });
+  const pageUrl = parseUrl(req.body?.pageUrl)?.href || "";
 
   const headers = mergeHeaders({ referer: parsed.origin, origin: parsed.origin }, requestHeaders(req.body?.headers));
   const job = createDownloadJob(parsed.href, headers, req.body?.fileName);
-  downloadDiscoveredCandidate({
+  const candidate = {
     url: parsed.href,
     headers,
     type: typeof req.body?.type === "string" ? req.body.type : "",
     statusCode: req.body?.statusCode || "",
     method: req.body?.method || "GET"
-  }, job, headers)
+  };
+  (pageUrl ? downloadCapturedCandidates([candidate], job, pageUrl) : downloadDiscoveredCandidate(candidate, job, headers))
     .then((result) => {
       job.status = result.success ? "complete" : "failed";
       job.result = result;
@@ -2228,8 +2304,9 @@ app.post("/api/extension-candidates", async (req, res) => {
   const deduped = [...new Map(valid.map((item) => [item.url, item])).values()];
   if (!deduped.length) return res.status(400).json({ error: "No valid media candidates were provided." });
 
-  const job = createDownloadJob(deduped[0].url, requestHeaders(), req.body?.fileName);
-  downloadCapturedCandidates(deduped, job)
+  const pageUrl = parseUrl(req.body?.pageUrl)?.href || "";
+  const job = createDownloadJob(pageUrl || deduped[0].url, requestHeaders(), req.body?.fileName);
+  downloadCapturedCandidates(deduped, job, pageUrl)
     .then((result) => {
       job.status = result.success ? "complete" : "failed";
       job.result = result;
@@ -2255,6 +2332,9 @@ app.get(["/api/file/:id", "/api/file/:id/:name"], async (req, res) => {
 
   if (record.type === "remote-mux") {
     return streamRemoteMuxRecord(record, res);
+  }
+  if (record.type === "remote-direct") {
+    return streamRemoteDirectRecord(record, res);
   }
 
   const info = await stat(record.path).catch(() => null);
@@ -2310,6 +2390,21 @@ function streamRemoteMuxRecord(record, res) {
   child.on("error", (error) => {
     if (!res.headersSent) res.status(502).send(error.message);
   });
+}
+
+async function streamRemoteDirectRecord(record, res) {
+  try {
+    const upstream = await fetchWithTimeout(record.url, {
+      headers: record.headers,
+      timeoutMs: RANGE_REQUEST_TIMEOUT_MS
+    });
+    if (!upstream.ok || !upstream.body) return res.status(502).send(`Upstream media request failed: HTTP ${upstream.status}`);
+    res.setHeader("content-type", upstream.headers.get("content-type") || "video/mp4");
+    res.setHeader("content-disposition", attachmentHeader(record.fileName));
+    await pipeline(Readable.fromWeb(upstream.body), res);
+  } catch (error) {
+    if (!res.headersSent) res.status(502).send(error.name === "AbortError" ? "Request timed out." : error.message);
+  }
 }
 
 app.get("/api/download", async (req, res) => {

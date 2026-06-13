@@ -121,7 +121,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === "get-items") {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       const tab = tabs[0];
-      sendResponse({ tabId: tab?.id, items: tab ? tabItems.get(tab.id) || [] : [] });
+      sendResponse({ tabId: tab?.id, pageUrl: tab?.url || "", pageTitle: tab?.title || "", items: tab ? tabItems.get(tab.id) || [] : [] });
     });
     return true;
   }
@@ -130,7 +130,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
       const tab = tabs[0];
       if (tab?.id) await scanActivePage(tab.id).catch(() => {});
-      sendResponse({ ok: true, tabId: tab?.id, items: tab?.id ? tabItems.get(tab.id) || [] : [] });
+      sendResponse({ ok: true, tabId: tab?.id, pageUrl: tab?.url || "", pageTitle: tab?.title || "", items: tab?.id ? tabItems.get(tab.id) || [] : [] });
     });
     return true;
   }
