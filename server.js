@@ -115,7 +115,7 @@ async function createNodeToolWrapper(name, scriptPath) {
 
 async function createWrapperTool(name) {
   if (process.platform === "win32") return;
-  const scriptPath = path.join(process.cwd(), "tools", "wrappers", "tool-wrapper.mjs");
+  const scriptPath = path.join(process.cwd(), "wrappers", "tool-wrapper.mjs");
   try {
     await access(scriptPath);
     const target = path.join(BUNDLED_TOOL_DIR, name);

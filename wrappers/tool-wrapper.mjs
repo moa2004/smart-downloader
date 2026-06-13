@@ -85,7 +85,7 @@ try {
     await runYtDlp(valueAfter("--output"));
   } else if (tool === "lux") {
     const outDir = valueAfter("--output-path") || process.cwd();
-    const outName = valueAfter("--output-name") || "%(title)s.%(ext)s";
+    const outName = valueAfter("--output-name") || "%(title)s";
     await runYtDlp(path.join(outDir, `${outName}.%(ext)s`));
   } else if (tool === "you-get") {
     const outDir = valueAfter("--output-dir") || process.cwd();
