@@ -364,8 +364,14 @@ function candidateScore(candidate) {
   return 0;
 }
 
-function fileUrl(id) {
-  return `/api/file/${encodeURIComponent(id)}`;
+function fileUrl(id, fileName = "") {
+  const safeName = safeFileName(fileName || "");
+  return safeName ? `/api/file/${encodeURIComponent(id)}/${encodeURIComponent(safeName)}` : `/api/file/${encodeURIComponent(id)}`;
+}
+
+function attachmentHeader(fileName) {
+  const safeName = safeFileName(fileName || "video.mp4");
+  return `attachment; filename="${safeName}"; filename*=UTF-8''${encodeURIComponent(safeName)}`;
 }
 
 function publicToolName(name) {
@@ -1797,7 +1803,7 @@ async function muxRemoteAudioVideo(videoCandidate, audioCandidate, videoHeaders,
       targetUrl: videoCandidate.url,
       fileName,
       fileSize: null,
-      downloadUrl: fileUrl(id),
+      downloadUrl: fileUrl(id, fileName),
       message: "Ready to stream combined video and audio without using server disk."
     };
   }
@@ -2229,7 +2235,7 @@ app.get("/api/jobs/:id", (req, res) => {
   res.json(publicJob(job));
 });
 
-app.get("/api/file/:id", async (req, res) => {
+app.get(["/api/file/:id", "/api/file/:id/:name"], async (req, res) => {
   const record = completedDownloads.get(req.params.id);
   if (!record) return res.status(404).send("Download file is no longer available. Try the download again.");
 
@@ -2245,14 +2251,14 @@ app.get("/api/file/:id", async (req, res) => {
 
   res.setHeader("content-type", "application/octet-stream");
   res.setHeader("content-length", String(info.size));
-  res.setHeader("content-disposition", `attachment; filename="${record.fileName}"`);
+  res.setHeader("content-disposition", attachmentHeader(record.fileName));
   createReadStream(record.path).pipe(res);
 });
 
 function streamRemoteMuxRecord(record, res) {
   const command = publicToolName("ffmpeg");
   res.setHeader("content-type", "video/mp4");
-  res.setHeader("content-disposition", `attachment; filename="${record.fileName}"`);
+  res.setHeader("content-disposition", attachmentHeader(record.fileName));
 
   const child = spawn(command, [
     "-hide_banner",

@@ -107,10 +107,10 @@ function probeTable(title, probes = []) {
   `;
 }
 
-function startBrowserDownload(downloadUrl) {
+function startBrowserDownload(downloadUrl, fileName = "") {
   const link = document.createElement("a");
   link.href = downloadUrl;
-  link.download = "";
+  link.download = fileName || "video.mp4";
   link.style.display = "none";
   document.body.appendChild(link);
   link.click();
@@ -157,9 +157,9 @@ function setupTheme() {
   });
 }
 
-function renderDownloadAttempt(data, inputUrl, attempts = []) {
-  if (data.success) {
-    startBrowserDownload(data.downloadUrl);
+function renderDownloadAttempt(data, inputUrl, attempts = [], autoDownload = true) {
+  if (data.success && autoDownload) {
+    startBrowserDownload(data.downloadUrl, data.fileName);
   }
 
   const statusTitle = data.success ? "Your file is ready" : "Could not prepare the file";
@@ -238,9 +238,9 @@ async function pollJob(jobId, inputUrl) {
     const result = job.result || { success: false, reason: job.error || "Download failed." };
     if (result.success && !downloaded) {
       downloaded = true;
-      startBrowserDownload(result.downloadUrl);
+      startBrowserDownload(result.downloadUrl, result.fileName);
     }
-    renderDownloadAttempt(result, inputUrl, job.attempts);
+    renderDownloadAttempt(result, inputUrl, job.attempts, false);
     return;
   }
 }
