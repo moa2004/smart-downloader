@@ -1414,7 +1414,7 @@ async function downloadWithRanges(url, job = null, headers = requestHeaders(), e
     : mediaFileNameFromUrl(url, `${id}.${finalExt}`);
   const outputPath = path.join(DOWNLOAD_DIR, `${id}-${fileName}`);
   const probeHeaders = { ...headers, range: "bytes=0-0" };
-  const probe = await fetchWithTimeout(url, { headers: probeHeaders }).catch((error) => ({ error }));
+  const probe = await fetchRangeProbe(url, probeHeaders);
   if (probe.error) return { success: false, reason: `Range probe failed: ${probe.error.message}` };
 
   const contentRange = parseContentRange(probe.headers.get("content-range") || "");
@@ -1507,6 +1507,22 @@ async function downloadWithRanges(url, job = null, headers = requestHeaders(), e
     localPath: outputPath,
     message: "Range downloader reconstructed the full media file."
   };
+}
+
+async function fetchRangeProbe(url, headers) {
+  let lastError = null;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const response = await fetchWithTimeout(url, {
+      headers,
+      timeoutMs: RANGE_REQUEST_TIMEOUT_MS
+    }).catch((error) => {
+      lastError = error;
+      return null;
+    });
+    if (response) return response;
+    await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+  }
+  return { error: lastError || new Error("Range probe timed out.") };
 }
 
 async function downloadWithQueryRanges(url, job = null, headers = requestHeaders(), id = randomUUID(), fileName = null, outputPath = null, engineName = "range-downloader") {
