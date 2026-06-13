@@ -1774,6 +1774,55 @@ async function muxAudioVideo(video, audio, job = null) {
   };
 }
 
+async function muxRemoteAudioVideo(videoCandidate, audioCandidate, videoHeaders, audioHeaders, job = null) {
+  const command = publicToolName("ffmpeg");
+  if (!(await commandExists(command))) return { success: false, reason: "ffmpeg is not installed or not in PATH." };
+
+  const id = randomUUID();
+  const fileName = jobFileName(job, `${id}.mp4`, "mp4");
+  const outputPath = path.join(DOWNLOAD_DIR, fileName);
+  addAttempt(job, "ffmpeg-remote-mux", "running", "Combining remote video and audio streams...");
+  const result = await runProcess(command, [
+    "-y",
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    ...ffmpegHeaderArgs(videoHeaders),
+    "-i",
+    normalizeMediaDownloadUrl(videoCandidate.url),
+    ...ffmpegHeaderArgs(audioHeaders),
+    "-i",
+    normalizeMediaDownloadUrl(audioCandidate.url),
+    "-fs",
+    String(MAX_DOWNLOAD_BYTES),
+    "-c",
+    "copy",
+    "-movflags",
+    "+faststart",
+    outputPath
+  ], PROCESS_TIMEOUT_MS);
+
+  const info = await stat(outputPath).catch(() => null);
+  if (!result.ok || !info?.isFile() || info.size < MIN_STREAM_MEDIA_BYTES) {
+    await unlink(outputPath).catch(() => {});
+    addAttempt(job, "ffmpeg-remote-mux", "failed", "Could not combine remote video and audio.");
+    return { success: false, reason: "ffmpeg could not combine the remote captured streams.", detail: result.stderr || result.stdout };
+  }
+
+  completedDownloads.set(id, { path: outputPath, fileName, size: info.size, engine: "ffmpeg-remote-mux" });
+  updateAttemptProgress(job, "ffmpeg-remote-mux", progressFromBytes(info.size, info.size));
+  addAttempt(job, "ffmpeg-remote-mux", "success", "Combined remote video and audio.");
+  return {
+    success: true,
+    source: "ffmpeg-remote-mux",
+    targetUrl: videoCandidate.url,
+    fileName,
+    fileSize: info.size,
+    downloadUrl: fileUrl(id),
+    message: "Combined captured video and audio into one MP4 file without storing separate temp streams."
+  };
+}
+
 async function downloadCapturedCandidates(candidates, job) {
   candidates.sort((a, b) => candidateScore(b) - candidateScore(a));
   const actionable = candidates.filter((candidate) => !isOpaqueWorkspacePlayback(candidate.url));
@@ -1800,6 +1849,11 @@ async function downloadCapturedCandidates(candidates, job) {
     addAttempt(job, "capture-pair", "running", "Found separate video and audio streams.");
     const videoHeaders = mergeHeaders({ referer: new URL(videoCandidate.url).origin, origin: new URL(videoCandidate.url).origin }, videoCandidate.headers);
     const audioHeaders = mergeHeaders({ referer: new URL(audioCandidate.url).origin, origin: new URL(audioCandidate.url).origin }, audioCandidate.headers);
+    if (process.env.VERCEL) {
+      const remoteMux = await muxRemoteAudioVideo(videoCandidate, audioCandidate, videoHeaders, audioHeaders, job);
+      if (remoteMux.success) return remoteMux;
+      addAttempt(job, "ffmpeg-remote-mux", "failed", remoteMux.reason || "Remote mux failed; falling back to range downloads.");
+    }
     const [video, audio] = await Promise.all([
       runEngine(job, "video-download", () => downloadWithRanges(videoCandidate.url, job, videoHeaders, "video-download")),
       runEngine(job, "audio-download", () => downloadWithRanges(audioCandidate.url, job, audioHeaders, "audio-download"))
