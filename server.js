@@ -47,6 +47,12 @@ const SYSTEM_BROWSERS = [
 ];
 
 app.use(express.json({ limit: "2mb" }));
+app.use((req, res, next) => {
+  if (req.path.endsWith(".js") || req.path.startsWith("/api/")) {
+    res.setHeader("cache-control", "no-store");
+  }
+  next();
+});
 app.use(express.static("public"));
 
 const completedDownloads = new Map();
@@ -302,6 +308,12 @@ function requestedFileName(value, fallback, ext = "") {
   const base = safeFileName(value || fallback || "video");
   if (!ext) return base;
   return /\.[a-z0-9]{2,5}$/i.test(base) ? base : `${base}.${ext.replace(/^\./, "")}`;
+}
+
+function forceFileExtension(value, ext) {
+  const cleanExt = ext.replace(/^\./, "");
+  const base = safeFileName(value || `video.${cleanExt}`).replace(/\.[a-z0-9]{2,5}$/i, "");
+  return safeFileName(`${base || "video"}.${cleanExt}`);
 }
 
 function mediaFileNameFromUrl(url, fallback = "media.bin") {
@@ -1650,7 +1662,7 @@ async function downloadWithFfmpeg(url, job = null, timeoutMs = PROCESS_TIMEOUT_M
   if (!(await commandExists(command))) return { success: false, reason: "ffmpeg is not installed or not in PATH." };
 
   const id = randomUUID();
-  const fileName = jobFileName(job, `${id}.mp4`, "mp4");
+  const fileName = forceFileExtension(job?.fileName || `${id}.mp4`, "mp4");
   const outputPath = path.join(DOWNLOAD_DIR, fileName);
   const stopProgress = startFileProgress(job, "ffmpeg", { filePath: outputPath });
   const result = await runProcess(command, [

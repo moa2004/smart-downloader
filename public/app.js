@@ -107,10 +107,15 @@ function probeTable(title, probes = []) {
   `;
 }
 
+function displayDownloadName(fileName = "") {
+  const clean = String(fileName || "video.mp4").trim() || "video.mp4";
+  return /\.bin$/i.test(clean) ? clean.replace(/\.bin$/i, ".mp4") : clean;
+}
+
 function startBrowserDownload(downloadUrl, fileName = "") {
   const link = document.createElement("a");
   link.href = downloadUrl;
-  link.download = fileName || "video.mp4";
+  link.download = displayDownloadName(fileName);
   link.style.display = "none";
   document.body.appendChild(link);
   link.click();
