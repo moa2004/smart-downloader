@@ -1780,6 +1780,28 @@ async function muxRemoteAudioVideo(videoCandidate, audioCandidate, videoHeaders,
 
   const id = randomUUID();
   const fileName = jobFileName(job, `${id}.mp4`, "mp4");
+  if (process.env.VERCEL) {
+    completedDownloads.set(id, {
+      type: "remote-mux",
+      fileName,
+      videoUrl: normalizeMediaDownloadUrl(videoCandidate.url),
+      audioUrl: normalizeMediaDownloadUrl(audioCandidate.url),
+      videoHeaders,
+      audioHeaders,
+      engine: "ffmpeg-remote-mux"
+    });
+    addAttempt(job, "ffmpeg-remote-mux", "success", "Remote mux stream is ready.");
+    return {
+      success: true,
+      source: "ffmpeg-remote-mux",
+      targetUrl: videoCandidate.url,
+      fileName,
+      fileSize: null,
+      downloadUrl: fileUrl(id),
+      message: "Ready to stream combined video and audio without using server disk."
+    };
+  }
+
   const outputPath = path.join(DOWNLOAD_DIR, fileName);
   addAttempt(job, "ffmpeg-remote-mux", "running", "Combining remote video and audio streams...");
   const result = await runProcess(command, [
@@ -2211,6 +2233,10 @@ app.get("/api/file/:id", async (req, res) => {
   const record = completedDownloads.get(req.params.id);
   if (!record) return res.status(404).send("Download file is no longer available. Try the download again.");
 
+  if (record.type === "remote-mux") {
+    return streamRemoteMuxRecord(record, res);
+  }
+
   const info = await stat(record.path).catch(() => null);
   if (!info?.isFile()) {
     completedDownloads.delete(req.params.id);
@@ -2222,6 +2248,49 @@ app.get("/api/file/:id", async (req, res) => {
   res.setHeader("content-disposition", `attachment; filename="${record.fileName}"`);
   createReadStream(record.path).pipe(res);
 });
+
+function streamRemoteMuxRecord(record, res) {
+  const command = publicToolName("ffmpeg");
+  res.setHeader("content-type", "video/mp4");
+  res.setHeader("content-disposition", `attachment; filename="${record.fileName}"`);
+
+  const child = spawn(command, [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    ...ffmpegHeaderArgs(record.videoHeaders),
+    "-i",
+    record.videoUrl,
+    ...ffmpegHeaderArgs(record.audioHeaders),
+    "-i",
+    record.audioUrl,
+    "-c",
+    "copy",
+    "-movflags",
+    "frag_keyframe+empty_moov",
+    "-f",
+    "mp4",
+    "pipe:1"
+  ], { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+
+  let stderr = "";
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk.toString();
+    if (stderr.length > 4000) stderr = stderr.slice(-4000);
+  });
+  child.stdout.pipe(res);
+  res.on("close", () => {
+    if (!child.killed) child.kill("SIGKILL");
+  });
+  child.on("close", (code) => {
+    if (code !== 0 && !res.headersSent) {
+      res.status(502).send(stderr || "ffmpeg remote mux failed.");
+    }
+  });
+  child.on("error", (error) => {
+    if (!res.headersSent) res.status(502).send(error.message);
+  });
+}
 
 app.get("/api/download", async (req, res) => {
   const parsed = parseUrl(req.query.url);
