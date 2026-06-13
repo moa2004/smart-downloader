@@ -81,12 +81,16 @@ async function prepareBundledTools() {
     safeRequire("yt-dlp-exec/src/constants")?.YOUTUBE_DL_PATH ||
       path.join(process.cwd(), "node_modules", "yt-dlp-exec", "bin", ytDlpFile)
   );
+  if (bundledTools["yt-dlp"]) process.env.SMART_DOWNLOADER_YTDLP = bundledTools["yt-dlp"];
   const aria2Path = process.platform === "linux" && process.arch === "x64"
     ? path.join(process.cwd(), "node_modules", "@naria2", "linux-x64", "aria2c")
     : null;
   await copyBundledTool("aria2c", aria2Path);
   await createNodeToolWrapper("N_m3u8DL-RE", path.join(process.cwd(), "node_modules", "@javagt", "n-m3u8dl-re", "dist", "cli", "index.js"));
   await createNodeToolWrapper("ipull", path.join(process.cwd(), "node_modules", "ipull", "dist", "cli", "cli.js"));
+  for (const name of ["curl", "wget", "lux", "you-get", "gallery-dl", "streamlink", "browser-scan"]) {
+    await createWrapperTool(name);
+  }
 }
 
 function safeRequire(id) {
@@ -103,6 +107,19 @@ async function createNodeToolWrapper(name, scriptPath) {
     await access(scriptPath);
     const target = path.join(BUNDLED_TOOL_DIR, name);
     await writeFile(target, `#!/bin/sh\nexec node "${scriptPath}" "$@"\n`);
+    await chmod(target, 0o755).catch(() => {});
+    bundledTools[name] = target;
+  } catch {
+  }
+}
+
+async function createWrapperTool(name) {
+  if (process.platform === "win32") return;
+  const scriptPath = path.join(process.cwd(), "tools", "wrappers", "tool-wrapper.mjs");
+  try {
+    await access(scriptPath);
+    const target = path.join(BUNDLED_TOOL_DIR, name);
+    await writeFile(target, `#!/bin/sh\nexec node "${scriptPath}" "${name}" "$@"\n`);
     await chmod(target, 0o755).catch(() => {});
     bundledTools[name] = target;
   } catch {
@@ -390,6 +407,9 @@ async function toolStatus() {
   };
   const entries = await Promise.all(Object.entries(tools).map(async ([name, command]) => {
     if (name === "browser-scan") {
+      if (process.env.VERCEL && await commandExists(command)) {
+        return [name, { command, available: true }];
+      }
       const browserPath = await findSystemBrowser();
       return [name, { command: browserPath || "Playwright Chromium", available: Boolean(browserPath) }];
     }
@@ -788,7 +808,14 @@ async function scanExposure(detail, headers) {
 }
 
 async function browserScanForMedia(url, headers = requestHeaders()) {
-  if (process.env.VERCEL) return [];
+  if (process.env.VERCEL) {
+    const html = await readTextSample(url, headers).catch(() => "");
+    return extractHtmlCandidates(html, url).map((candidateUrl) => ({
+      url: candidateUrl,
+      headers: mergeHeaders(headers, { referer: url }),
+      source: "serverless-scan"
+    }));
+  }
   const { chromium } = await import("playwright");
   const executablePath = await findSystemBrowser();
   const candidates = new Map();
