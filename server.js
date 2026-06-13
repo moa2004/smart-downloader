@@ -307,7 +307,9 @@ function safeFileName(value) {
 function requestedFileName(value, fallback, ext = "") {
   const base = safeFileName(value || fallback || "video");
   if (!ext) return base;
-  return /\.[a-z0-9]{2,5}$/i.test(base) ? base : `${base}.${ext.replace(/^\./, "")}`;
+  const cleanExt = ext.replace(/^\./, "");
+  if (/\.bin$/i.test(base)) return forceFileExtension(base, cleanExt);
+  return /\.[a-z0-9]{2,5}$/i.test(base) ? base : `${base}.${cleanExt}`;
 }
 
 function forceFileExtension(value, ext) {
@@ -376,9 +378,9 @@ function candidateScore(candidate) {
   return 0;
 }
 
-function fileUrl(id, fileName = "") {
-  const safeName = safeFileName(fileName || "");
-  return safeName ? `/api/file/${encodeURIComponent(id)}/${encodeURIComponent(safeName)}` : `/api/file/${encodeURIComponent(id)}`;
+function fileUrl(id, fileName = "video.mp4") {
+  const safeName = safeFileName(fileName || "video.mp4");
+  return `/api/file/${encodeURIComponent(id)}/${encodeURIComponent(safeName)}`;
 }
 
 function attachmentHeader(fileName) {
@@ -1797,7 +1799,7 @@ async function muxRemoteAudioVideo(videoCandidate, audioCandidate, videoHeaders,
   if (!(await commandExists(command))) return { success: false, reason: "ffmpeg is not installed or not in PATH." };
 
   const id = randomUUID();
-  const fileName = jobFileName(job, `${id}.mp4`, "mp4");
+  const fileName = forceFileExtension(job?.fileName || `${id}.mp4`, "mp4");
   if (process.env.VERCEL) {
     completedDownloads.set(id, {
       type: "remote-mux",
