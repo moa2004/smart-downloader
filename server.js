@@ -401,7 +401,7 @@ async function toolStatus() {
     "you-get": publicToolName("you-get"),
     "gallery-dl": publicToolName("gallery-dl"),
     ipull: publicToolName("ipull"),
-    "browser-scan": publicToolName("chrome"),
+    "browser-scan": process.env.VERCEL ? publicToolName("browser-scan") : publicToolName("chrome"),
     ffmpeg: publicToolName("ffmpeg"),
     streamlink: publicToolName("streamlink")
   };
